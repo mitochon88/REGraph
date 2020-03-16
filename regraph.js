@@ -1,40 +1,40 @@
 // =============================================================================
-// REGraph.js v1.2
-// http://www.wh2.fiberbit.net/yttrium88_23/
+// REGraph.js v1.5.20180909
+// https://github.com/yttrium88/REGraph
+// Copyright (c) 2018 yttrium88
+// Released under the MIT license
+// http://opensource.org/licenses/mit-license.php
 // =============================================================================
-(function(global) {"use strict"; if (global["REGraph"]) return;
+"use strict";
 
-if (typeof exports === "object")
-	module["exports"] = REGraph;
-else
-	global["REGraph"] = REGraph;
+export default REGraph;
+
+//;;;const global = ("global", eval)("this");
+//;;;global.echo = global.echo || console.log.bind(console);
 
 // =============================================================================
 // Class
 // =============================================================================
 
-function REGraph() {
+function REGraph()
+{
 	//without new
 	if (!(this instanceof REGraph))
 		return new REGraph();
 	this._graph = {};
 	this._action = {};
-	this._string = "";
-	this._position = 0;
-	this._stack = [];
-	this._labelStack = [];
-	this._locked = false;
-	Object.seal(this);
 }
 
-REGraph["START"] = ["START"];
-REGraph["END"] = ["END"];
+REGraph["START"] = Symbol("REGraph.START");
+REGraph["END"] = Symbol("REGraph.END");
+REGraph["IGNORE"] = Symbol("REGraph.IGNORE");
 
 REGraph["prototype"] =
 {
 	"constructor" : REGraph,
-	"setGraph"    : REGraph_setGraph,
-	"setAction"   : REGraph_setAction,
+	"define"      : REGraph_define,
+	"setGraph"    : REGraph_setGraph, //obsolate
+	"setAction"   : REGraph_setAction, //obsolate
 	"parse"       : REGraph_parse
 };
 
@@ -42,87 +42,138 @@ REGraph["prototype"] =
 // Prototype
 // =============================================================================
 
-function REGraph_setGraph(/*string*/ name, /*Object*/ node, /*Array*/ edge)
+function REGraph_define(/*Object*/ defObj)
+{
+	this._graph[defObj["name"]] = {
+		node : defObj["node"],
+		edge : defObj["edge"]
+	};
+	this._action[defObj["name"]] = defObj["action"];
+}
+
+function REGraph_setGraph(/*string*/ name, /*Object*/ node, /*Object*/ edge)
 {
 	this._graph[name] = {
-		node : node,
-		edge : edge
+		node,
+		edge
 	};
 }
 
-function REGraph_setAction(/*string*/ name, /*Function*/ fn)
+function REGraph_setAction(/*string*/ name, /*function*/ fn)
 {
 	this._action[name] = fn;
 }
 
-function parseGraph(/*string*/ graphName)
+function /*boolean*/ parseGraph(/*string*/ graphName)
 {
-//;;;if(!global.echo) {global.echo = function(x) {console.log(x);};Array.prototype.toString = function(){return "[" + this.join(",") + "]"};}
+	//存在しないグラフ
+	if (!this._graph.hasOwnProperty(graphName)) {
+		this._locked = false;
+		throw new Error(`Graph <${graphName}> is not exist!`);
+	}
 	this._stack.push([]);
 	this._labelStack.push([]);
-	var graph = this._graph[graphName];
-	var depth = this._stack.length - 1;
-	var cur_label = REGraph["START"];
-	var /*boolean*/ is_terminal;
-	var /*RegExp.exec[]*/ reg_matched;
-//;;;echo(depth + "/" + graphName + ": push " + this._labelStack);
+	const graph = this._graph[graphName];
+	const depth = this._stack.length - 1;
+	let cur_node = REGraph["START"];
+
+	//グラフの直近通過位置の記録
+	if (this._passedAt[graphName]) {
+		//左再帰の検出
+		if (this._passedAt[graphName].slice(-1) === this._position)
+			throw new Error(`Left recursion detected at graph <${graphName}>!`);
+		this._passedAt[graphName].push(this._position);
+	}else
+		this._passedAt[graphName] = [this._position];
+
+	//走査開始
+//;;;echo((">").repeat(depth+1), "開始:", graphName);
 	while (true) {
-		is_terminal = false;
-		//現在ノードからのエッジ列挙
-		for (var i=-1; ++i<graph.edge.length;) {
-			if (graph.edge[i][0] !== cur_label)
-				continue;
-			if (graph.edge[i][1] === REGraph["END"])
+
+		//無視
+		if (graph.node.hasOwnProperty(REGraph["IGNORE"])) {
+			let /*RegExp.exec[]*/ reg_ignore = graph.node[REGraph["IGNORE"]].exec(this._string);
+			if (reg_ignore && reg_ignore.index === 0) {
+//;;;echo((">").repeat(depth+1), "無視:", graphName, reg_ignore[0]);
+				this._string = this._string.slice(reg_ignore[0].length);
+				this._stack[depth].push(reg_ignore[0]);
+				this._labelStack[depth].push(REGraph["IGNORE"]);
+				this._position += reg_ignore[0].length;
+			}
+		}
+
+		//探索：次ノード候補を走査(見つけ次第BREAK)
+		let /*boolean*/ is_terminal = false;
+		for (var nodeIndex=-1; ++nodeIndex<graph.edge[cur_node].length;) {
+			var nextNode = graph.edge[cur_node][nodeIndex];
+
+			//次のノードが終点シンボル
+			if (nextNode === REGraph["END"])
 				is_terminal = true;
-			else if (typeof graph.node[graph.edge[i][1]] === "string") {
-				//非終端
-				if (parseGraph.call(this, graph.node[graph.edge[i][1]])) {
+
+			//次のノードが非終端記号
+			else if (typeof graph.node[nextNode] === "string") {
+				if (parseGraph.call(this, graph.node[nextNode])) {
+//;;;echo((">").repeat(depth+1), "受理:", graphName, this._stack[depth+1]);
 					this._stack[depth].push(this._stack.pop());
-					this._labelStack[depth].push(graph.edge[i][1]);
-//;;;echo(depth + "/" + graphName + ": reduce " + this._labelStack);
+					this._labelStack[depth].push(nextNode);
 					break;
 				}
+
+			//次のノードが終端記号
 			}else {
-				//終端
-				reg_matched = graph.node[graph.edge[i][1]].exec(this._string);
+				let /*RegExp.exec[]*/ reg_matched = graph.node[nextNode].exec(this._string);
 				if (reg_matched && reg_matched.index === 0) {
+//;;;echo((">").repeat(depth+1), "受理:", graphName, reg_matched[0]);
 					this._string = this._string.slice(reg_matched[0].length);
 					this._stack[depth].push(reg_matched[0]);
-					this._labelStack[depth].push(graph.edge[i][1]);
+					this._labelStack[depth].push(nextNode);
 					this._position += reg_matched[0].length;
-//;;;echo(depth + "/" + graphName + ": accept " + reg_matched[0]);
 					break;
 				}
 			}
 		}
-		if (i === graph.edge.length) {
-			//全エッジ探索完了→マッチしなかった
+
+		//全エッジ探索完了(BREAKしなかった場合)
+		if (nodeIndex === graph.edge[cur_node].length) {
+
+			//終点可ノード→文字列確定
 			if (is_terminal) {
-				//終点ノード→終了
-//;;;echo(depth + "/" + graphName + ": call " + this._labelStack[depth]);
-				this._stack.push(this._action[graphName](this._stack.pop(), this._labelStack.pop()));
+//;;;echo((">").repeat(depth+1), "確定:", graphName, this._stack[depth].filter((e, i) => this._labelStack[depth][i] !== REGraph["IGNORE"]));
+				let tmp = this._action[graphName].call(this,
+					this._stack.pop().filter((e, i) => this._labelStack[depth][i] !== REGraph["IGNORE"]),
+					this._labelStack.pop().filter(e => e!==REGraph["IGNORE"])
+				);
+//;;;echo((">").repeat(depth+1), "解決:", graphName, "=>" , tmp);
+				this._stack.push(tmp);
 				return true;
+
+			//終点不可ノード→バックトラック
 			}else {
-				//失敗→バックトラック
-				this._string = this._stack.pop().join("") + this._string;
 				this._labelStack.pop();
-//;;;echo(depth + "/" + graphName + ": failed");
+				let recovery = this._stack.pop().join("");
+//;;;echo((">").repeat(depth+1), "失敗:", graphName, recovery);
+				this._passedAt[graphName].pop();
+				this._position -= recovery.length;
+				this._string = recovery + this._string;
 				return false;
 			}
+
+		//次のノードへ移動
 		}else
-			//次のノードへ
-			cur_label = graph.edge[i][1];
+			cur_node = nextNode;
 	}
 }
 
 function REGraph_parse(/*string*/ root, /*string*/ str)
 {
 	if (this._locked)
-		return;
+		throw new Error("parser has been already running");
 	if (str.length === 0)
 		throw new TypeError("empty string");
 	this._string = str;
 	this._position = 0;
+	this._passedAt = {};
 	this._stack = [];
 	this._labelStack = [];
 	this._locked = true;
@@ -130,7 +181,5 @@ function REGraph_parse(/*string*/ root, /*string*/ str)
 	this._locked = false;
 	if (this._string.length === 0)
 		return this._stack[0];
-	throw new Error("unparseable string: " + str.slice(this._position));
+	throw new Error(`parsing stopped at ${this._position} => ${str.slice(this._position)}`);
 }
-
-})(("global", eval)("this"));

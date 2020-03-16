@@ -1,67 +1,78 @@
+//全部右結合。
+
+function test(expr) {
+	return parser.parse("sumsub", expr);
+}
+
 var parser = new REGraph();
 
-parser.setGraph("sumsub", {
-	"sum" : /\+/,
-	"sub" : /\-/,
-	"mld" : "muldiv"
-}, [
-	[REGraph.START, "mld"],
-	["sum", "mld"],
-	["sub", "mld"],
-	["mld", REGraph.END], ["mld", "sum"], ["mld", "sub"]
-]);
-
-parser.setAction("sumsub", function(stack, label) {
+parser.define({
+name : "sumsub",
+node : {
+	[REGraph.IGNORE] : /\s+/,
+	mld : "muldiv",
+	sum : /\+/,
+	sub : /\-/,
+	smb : "sumsub"
+},
+edge : {
+	[REGraph.START] : ["mld"],
+	mld : [REGraph.END, "sum", "sub"],
+	sum : ["smb"],
+	sub : ["smb"],
+	smb : [REGraph.END]
+},
+action : function(stack, label) {
 	if (stack.length === 1)
 		return stack[0];
-	var n = stack[0];
-	for (var i=0; i<stack.length;) {
-		if (label[++i] === "sum")
-			n += stack[++i];
-		if (label[i] === "sub")
-			n -= stack[++i];
-	}
-	return n;
+	if (label[1] === "sum")
+		return stack[0] + stack[2];
+	return stack[0] - stack[2];
+}
 });
 
-parser.setGraph("muldiv", {
-	"mul" : /\*/,
-	"div" : /\//,
-	"mod" : /\%/,
-	"una" : "unary"
-}, [
-	[REGraph.START, "una"],
-	["mul", "una"],
-	["div", "una"],
-	["mod", "una"],
-	["una", REGraph.END], ["una", "mul"], ["una", "div"], ["una", "mod"]
-]);
-
-parser.setAction("muldiv", function(stack, label) {
-	if (stack.length === 1)
+parser.define({
+name : "muldiv",
+node : {
+	[REGraph.IGNORE] : /\s+/,
+	una : "unary",
+	mul : /\*/,
+	div : /\//,
+	mod : /\%/,
+	mld : "muldiv"
+},
+edge : {
+	[REGraph.START] : ["una"],
+	una : [REGraph.END, "mul", "div", "mod"],
+	mul : ["mld"],
+	div : ["mld"],
+	mod : ["mld"],
+	mld : [REGraph.END]
+},
+action : function(stack, label) {
+	switch (true) {
+	case stack.length === 1 :
 		return stack[0];
-	var n = stack[0];
-	for (var i=0; i<stack.length;) {
-		if (label[++i] === "mul")
-			n *= stack[++i];
-		if (label[i] === "div")
-			n /= stack[++i];
-		if (label[i] === "mod")
-			n %= stack[++i];
+	case label[1] === "mul" :
+		return stack[0] * stack[2];
+	case label[1] === "div" :
+		return stack[0] / stack[2];
+	case label[1] === "mod" :
+		return stack[0] % stack[2];
 	}
-	return n;
+}
 });
 
 parser.setGraph("unary", {
-	"pls" : /\+/,
+	"prm" : "prime",
 	"mns" : /\-/,
-	"prm" : "prime"
-}, [
-	[REGraph.START, "prm"], [REGraph.START, "mns"], [REGraph.START, "pls"],
-	["pls", "prm"],
-	["mns", "prm"],
-	["prm", REGraph.END],
-]);
+	"pls" : /\+/
+}, {
+	[REGraph.START] : ["prm", "mns", "pls"],
+	"prm" : [REGraph.END],
+	"mns" : ["prm"],
+	"pls" : ["prm"]
+});
 
 parser.setAction("unary", function(stack, label) {
 	if (stack.length === 1)
@@ -76,13 +87,13 @@ parser.setGraph("prime", {
 	"opb" : /\(/,
 	"smb" : "sumsub",
 	"clb" : /\)/,
-}, [
-	[REGraph.START, "num"], [REGraph.START, "opb"],
-	["num", REGraph.END],
-	["opb", "smb"],
-	["smb", "clb"],
-	["clb", REGraph.END],
-]);
+}, {
+	[REGraph.START] : ["num", "opb"],
+	"num" : [REGraph.END],
+	"opb" : ["smb"],
+	"smb" : ["clb"],
+	"clb" : [REGraph.END]
+});
 
 parser.setAction("prime", function(stack, label) {
 	if (stack.length === 1)
